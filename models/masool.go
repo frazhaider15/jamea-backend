@@ -6,7 +6,8 @@ type MasoolData struct {
 }
 
 type Masool struct {
-	Id   int64        `json:"id"`
-	Name string       `json:"name"`
-	Data []MasoolData `json:"data"` // Stores all fields as key-value pairs
+	ID     uint         `gorm:"primaryKey" json:"id"`
+	Name   string       `gorm:"not null" json:"name"`
+	Module Module       `gorm:"not null;index" json:"module"` // Added module mapping
+	Data   []MasoolData `gorm:"type:jsonb;serializer:json" json:"data"`
 }

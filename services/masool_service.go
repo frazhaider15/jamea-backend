@@ -5,12 +5,13 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
+	"strings"
 
+	"github.com/jamea/db"
 	"github.com/jamea/models"
-	"github.com/jamea/store"
 )
 
-func UploadMasool(file multipart.File) error {
+func UploadMasool(file multipart.File, module models.Module) error {
 	reader := csv.NewReader(file)
 
 	// Read header
@@ -22,7 +23,7 @@ func UploadMasool(file multipart.File) error {
 	// Find the index of the "Name" column
 	nameIndex := -1
 	for i, h := range headers {
-		if h == "Name" {
+		if strings.EqualFold(h, "Name") {
 			nameIndex = i
 			break
 		}
@@ -41,16 +42,19 @@ func UploadMasool(file multipart.File) error {
 			return fmt.Errorf("failed to read CSV record: %v", err)
 		}
 
+		name := strings.TrimSpace(record[nameIndex])
+		if name == "" {
+			continue // Skip records with empty name
+		}
+
 		masool := models.Masool{
-			Name: record[nameIndex],
-			Data: make([]models.MasoolData, 0),
+			Name:   name,
+			Module: module, // Set the module
+			Data:   make([]models.MasoolData, 0),
 		}
 
 		for i, val := range record {
-			// Add all columns to the data list, including Name (as implied by "key data")
-			// or we can choose to exclude it. Since the prompt said "additionally store Masool name seperately",
-			// it implies it might be in the data too or just extracted.
-			// Storing everything in Data is safer for full context.
+			val = strings.TrimSpace(val)
 			if i < len(headers) {
 				masool.Data = append(masool.Data, models.MasoolData{
 					Key: headers[i],
@@ -59,7 +63,9 @@ func UploadMasool(file multipart.File) error {
 			}
 		}
 
-		store.AddMasool(masool)
+		if err := db.DB.Create(&masool).Error; err != nil {
+			return fmt.Errorf("failed to save masool to db: %v", err)
+		}
 	}
 
 	return nil
