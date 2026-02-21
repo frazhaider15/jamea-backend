@@ -42,11 +42,11 @@ func UploadMasool(ctx *gin.Context) {
 	}
 	defer file.Close()
 
-	err = services.UploadMasool(file, module)
+	data, err := services.UploadMasool(file, module)
 	if err != nil {
 		ctx.JSON(http.StatusBadRequest, NewStandardResponse(false, 400, err.Error(), nil))
 		return
 	}
 
-	ctx.JSON(http.StatusOK, NewStandardResponse(true, 200, "Masool data uploaded successfully", nil))
+	ctx.JSON(http.StatusOK, NewStandardResponse(true, 200, "Masool data uploaded successfully", data))
 }

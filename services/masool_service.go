@@ -11,13 +11,13 @@ import (
 	"github.com/jamea/models"
 )
 
-func UploadMasool(file multipart.File, module models.Module) error {
+func UploadMasool(file multipart.File, module models.Module) ([]models.Masool, error) {
 	reader := csv.NewReader(file)
 
 	// Read header
 	headers, err := reader.Read()
 	if err != nil {
-		return fmt.Errorf("failed to read CSV header: %v", err)
+		return nil, fmt.Errorf("failed to read CSV header: %v", err)
 	}
 
 	// Find the index of the "Name" column
@@ -30,8 +30,10 @@ func UploadMasool(file multipart.File, module models.Module) error {
 	}
 
 	if nameIndex == -1 {
-		return fmt.Errorf("CSV must contain a 'Name' column")
+		return nil, fmt.Errorf("CSV must contain a 'Name' column")
 	}
+
+	var uploaded []models.Masool
 
 	for {
 		record, err := reader.Read()
@@ -39,7 +41,7 @@ func UploadMasool(file multipart.File, module models.Module) error {
 			break
 		}
 		if err != nil {
-			return fmt.Errorf("failed to read CSV record: %v", err)
+			return nil, fmt.Errorf("failed to read CSV record: %v", err)
 		}
 
 		name := strings.TrimSpace(record[nameIndex])
@@ -55,18 +57,21 @@ func UploadMasool(file multipart.File, module models.Module) error {
 
 		for i, val := range record {
 			val = strings.TrimSpace(val)
-			if i < len(headers) {
+			key := strings.TrimSpace(headers[i])
+			if i < len(headers) && key != "" {
 				masool.Data = append(masool.Data, models.MasoolData{
-					Key: headers[i],
+					Key: key,
 					Val: val,
 				})
 			}
 		}
 
 		if err := db.DB.Create(&masool).Error; err != nil {
-			return fmt.Errorf("failed to save masool to db: %v", err)
+			return nil, fmt.Errorf("failed to save masool to db: %v", err)
 		}
+
+		uploaded = append(uploaded, masool)
 	}
 
-	return nil
+	return uploaded, nil
 }
