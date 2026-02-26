@@ -7,7 +7,7 @@ import (
 )
 
 func Migrate() {
-	err := DB.AutoMigrate(&models.User{}, &models.Masool{})
+	err := DB.AutoMigrate(&models.User{}, &models.Masool{}, &models.MasoolReport{})
 	if err != nil {
 		log.Fatal("Failed to migrate database: ", err)
 	}

@@ -1,0 +1,57 @@
+package controllers
+
+import (
+	"net/http"
+	"strconv"
+
+	"github.com/gin-gonic/gin"
+	"github.com/jamea/models"
+	"github.com/jamea/services"
+)
+
+func UploadMasoolReport(ctx *gin.Context) {
+	moduleStr := ctx.Query("module")
+	if moduleStr == "" {
+		ctx.JSON(http.StatusBadRequest, NewStandardResponse(false, 400, "module is required", nil))
+		return
+	}
+
+	module, err := models.NewModuleString(moduleStr)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, NewStandardResponse(false, 400, "invalid module", nil))
+		return
+	}
+
+	masoolIDStr := ctx.Query("masool_id")
+	if masoolIDStr == "" {
+		ctx.JSON(http.StatusBadRequest, NewStandardResponse(false, 400, "masool_id is required", nil))
+		return
+	}
+
+	masoolID, err := strconv.ParseUint(masoolIDStr, 10, 64)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, NewStandardResponse(false, 400, "masool_id must be a valid number", nil))
+		return
+	}
+
+	fileHeader, err := ctx.FormFile("file")
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, NewStandardResponse(false, 400, "file is required", nil))
+		return
+	}
+
+	file, err := fileHeader.Open()
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, NewStandardResponse(false, 500, "failed to open file", nil))
+		return
+	}
+	defer file.Close()
+
+	data, err := services.UploadMasoolReport(file, uint(masoolID), module)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, NewStandardResponse(false, 400, err.Error(), nil))
+		return
+	}
+
+	ctx.JSON(http.StatusOK, NewStandardResponse(true, 200, "Masool report data uploaded successfully", data))
+}
