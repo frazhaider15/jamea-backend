@@ -2,7 +2,6 @@ package controllers
 
 import (
 	"net/http"
-	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jamea/models"
@@ -22,18 +21,6 @@ func UploadMasoolReport(ctx *gin.Context) {
 		return
 	}
 
-	masoolIDStr := ctx.Query("masool_id")
-	if masoolIDStr == "" {
-		ctx.JSON(http.StatusBadRequest, NewStandardResponse(false, 400, "masool_id is required", nil))
-		return
-	}
-
-	masoolID, err := strconv.ParseUint(masoolIDStr, 10, 64)
-	if err != nil {
-		ctx.JSON(http.StatusBadRequest, NewStandardResponse(false, 400, "masool_id must be a valid number", nil))
-		return
-	}
-
 	fileHeader, err := ctx.FormFile("file")
 	if err != nil {
 		ctx.JSON(http.StatusBadRequest, NewStandardResponse(false, 400, "file is required", nil))
@@ -47,7 +34,7 @@ func UploadMasoolReport(ctx *gin.Context) {
 	}
 	defer file.Close()
 
-	data, err := services.UploadMasoolReport(file, uint(masoolID), module)
+	data, err := services.UploadMasoolReport(file, module)
 	if err != nil {
 		ctx.JSON(http.StatusBadRequest, NewStandardResponse(false, 400, err.Error(), nil))
 		return

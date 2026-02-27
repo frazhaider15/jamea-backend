@@ -5,25 +5,32 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
+	"strconv"
 	"strings"
 
 	"github.com/jamea/db"
 	"github.com/jamea/models"
 )
 
-func UploadMasoolReport(file multipart.File, masoolID uint, module models.Module) ([]models.MasoolReport, error) {
-	// Validate that the masool exists
-	var masool models.Masool
-	if err := db.DB.First(&masool, masoolID).Error; err != nil {
-		return nil, fmt.Errorf("masool with id %d not found", masoolID)
-	}
-
+func UploadMasoolReport(file multipart.File, module models.Module) ([]models.MasoolReport, error) {
 	reader := csv.NewReader(file)
 
 	// Read header
 	headers, err := reader.Read()
 	if err != nil {
 		return nil, fmt.Errorf("failed to read CSV header: %v", err)
+	}
+
+	// Find the index of the "ID" column
+	idIndex := -1
+	for i, h := range headers {
+		if strings.TrimSpace(strings.ToLower(h)) == "id" {
+			idIndex = i
+			break
+		}
+	}
+	if idIndex == -1 {
+		return nil, fmt.Errorf("CSV must contain an 'ID' column for masool_id")
 	}
 
 	var uploaded []models.MasoolReport
@@ -49,13 +56,32 @@ func UploadMasoolReport(file multipart.File, masoolID uint, module models.Module
 			continue
 		}
 
+		// Parse masool_id from the ID column
+		idStr := strings.TrimSpace(record[idIndex])
+		if idStr == "" {
+			return nil, fmt.Errorf("ID column cannot be empty")
+		}
+		masoolID, err := strconv.ParseUint(idStr, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid masool ID '%s': must be a valid number", idStr)
+		}
+
+		// Validate that the masool exists
+		var masool models.Masool
+		if err := db.DB.First(&masool, masoolID).Error; err != nil {
+			return nil, fmt.Errorf("masool with id %d not found", masoolID)
+		}
+
 		report := models.MasoolReport{
-			MasoolID: masoolID,
+			MasoolID: uint(masoolID),
 			Module:   module,
 			Data:     make([]models.MasoolData, 0),
 		}
 
 		for i, val := range record {
+			if i == idIndex {
+				continue // Skip the ID column from data
+			}
 			val = strings.TrimSpace(val)
 			key := strings.TrimSpace(headers[i])
 			if i < len(headers) && key != "" {
