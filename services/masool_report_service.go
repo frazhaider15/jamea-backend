@@ -101,3 +101,59 @@ func UploadMasoolReport(file multipart.File, module models.Module) ([]models.Mas
 
 	return uploaded, nil
 }
+
+// GetMasoolReport fetches all masools along with their associated report data.
+// It matches masool.id with masool_reports.masool_id and flattens the JSONB
+// key-val data from both tables into a single flat response per report.
+func GetMasoolReport(module models.Module) ([]map[string]interface{}, error) {
+	// 1. Fetch all masools for the given module
+	var masools []models.Masool
+	if err := db.DB.Where("module = ?", module).Find(&masools).Error; err != nil {
+		return nil, fmt.Errorf("failed to fetch masools: %v", err)
+	}
+
+	// 2. Build a lookup map: masool ID -> Masool
+	masoolMap := make(map[uint]models.Masool)
+	for _, m := range masools {
+		masoolMap[m.ID] = m
+	}
+
+	// 3. Fetch all masool reports for the given module
+	var reports []models.MasoolReport
+	if err := db.DB.Where("module = ?", module).Find(&reports).Error; err != nil {
+		return nil, fmt.Errorf("failed to fetch masool reports: %v", err)
+	}
+
+	// 4. Join and flatten the data
+	var result []map[string]interface{}
+	for _, report := range reports {
+		masool, exists := masoolMap[report.MasoolID]
+		if !exists {
+			continue // skip reports with no matching masool
+		}
+
+		entry := make(map[string]interface{})
+		entry["id"] = masool.ID
+		entry["name"] = masool.Name
+
+		// Add masool's key-val data
+		for _, d := range masool.Data {
+			key := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(d.Key), " ", "_"))
+			if key != "" && key != "name" && key != "id" {
+				entry[key] = d.Val
+			}
+		}
+
+		// Add/override with report's key-val data
+		for _, d := range report.Data {
+			key := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(d.Key), " ", "_"))
+			if key != "" {
+				entry[key] = d.Val
+			}
+		}
+
+		result = append(result, entry)
+	}
+
+	return result, nil
+}
