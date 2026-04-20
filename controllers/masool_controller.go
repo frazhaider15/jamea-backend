@@ -50,3 +50,24 @@ func UploadMasool(ctx *gin.Context) {
 
 	ctx.JSON(http.StatusOK, NewStandardResponse(true, 200, "Masool data uploaded successfully", data))
 }
+func DeleteMasool(ctx *gin.Context) {
+	moduleStr := ctx.Query("module")
+	if moduleStr == "" {
+		ctx.JSON(http.StatusBadRequest, NewStandardResponse(false, 400, "module is required", nil))
+		return
+	}
+
+	module, err := models.NewModuleString(moduleStr)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, NewStandardResponse(false, 400, "invalid module", nil))
+		return
+	}
+
+	err = services.DeleteMasoolsByModule(module)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, NewStandardResponse(false, 500, err.Error(), nil))
+		return
+	}
+
+	ctx.JSON(http.StatusOK, NewStandardResponse(true, 200, "Masool data deleted successfully", nil))
+}

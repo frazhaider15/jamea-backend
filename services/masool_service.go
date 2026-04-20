@@ -75,3 +75,6 @@ func UploadMasool(file multipart.File, module models.Module) ([]models.Masool, e
 
 	return uploaded, nil
 }
+func DeleteMasoolsByModule(module models.Module) error {
+	return db.DB.Where("module = ?", module).Delete(&models.Masool{}).Error
+}
