@@ -30,3 +30,6 @@ func GetActivities(module models.Module, month, year int) (models.Activity, erro
 	err := db.DB.Where("module = ? AND month = ? AND year = ?", module, month, year).First(&activity).Error
 	return activity, err
 }
+func DeleteActivitiesByModule(module models.Module) error {
+	return db.DB.Where("module = ?", module).Delete(&models.Activity{}).Error
+}

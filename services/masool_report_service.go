@@ -7,6 +7,7 @@ import (
 	"mime/multipart"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jamea/db"
 	"github.com/jamea/models"
@@ -34,6 +35,7 @@ func UploadMasoolReport(file multipart.File, module models.Module) ([]models.Mas
 	}
 
 	var uploaded []models.MasoolReport
+	currentMonth := time.Now().Format("2006_01")
 
 	for {
 		record, err := reader.Read()
@@ -75,6 +77,7 @@ func UploadMasoolReport(file multipart.File, module models.Module) ([]models.Mas
 		report := models.MasoolReport{
 			MasoolID: uint(masoolID),
 			Module:   module,
+			Month:    currentMonth,
 			Data:     make([]models.MasoolData, 0),
 		}
 
@@ -105,7 +108,7 @@ func UploadMasoolReport(file multipart.File, module models.Module) ([]models.Mas
 // GetMasoolReport fetches all masools along with their associated report data.
 // It matches masool.id with masool_reports.masool_id and flattens the JSONB
 // key-val data from both tables into a single flat response per report.
-func GetMasoolReport(module models.Module) ([]map[string]interface{}, error) {
+func GetMasoolReport(module models.Module, month string) ([]map[string]interface{}, error) {
 	// 1. Fetch all masools for the given module
 	var masools []models.Masool
 	if err := db.DB.Where("module = ?", module).Find(&masools).Error; err != nil {
@@ -120,7 +123,11 @@ func GetMasoolReport(module models.Module) ([]map[string]interface{}, error) {
 
 	// 3. Fetch all masool reports for the given module
 	var reports []models.MasoolReport
-	if err := db.DB.Where("module = ?", module).Find(&reports).Error; err != nil {
+	query := db.DB.Where("module = ?", module)
+	if month != "" {
+		query = query.Where("month = ?", month)
+	}
+	if err := query.Find(&reports).Error; err != nil {
 		return nil, fmt.Errorf("failed to fetch masool reports: %v", err)
 	}
 
@@ -135,6 +142,7 @@ func GetMasoolReport(module models.Module) ([]map[string]interface{}, error) {
 		entry := make(map[string]interface{})
 		entry["id"] = masool.ID
 		entry["name"] = masool.Name
+		entry["month"] = report.Month
 
 		// Add masool's key-val data
 		for _, d := range masool.Data {
@@ -156,4 +164,8 @@ func GetMasoolReport(module models.Module) ([]map[string]interface{}, error) {
 	}
 
 	return result, nil
+}
+
+func DeleteMasoolReportsByModule(module models.Module) error {
+	return db.DB.Where("module = ?", module).Delete(&models.MasoolReport{}).Error
 }

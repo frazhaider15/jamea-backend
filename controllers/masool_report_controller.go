@@ -56,11 +56,34 @@ func GetMasoolReport(ctx *gin.Context) {
 		return
 	}
 
-	data, err := services.GetMasoolReport(module)
+	month := ctx.Query("month")
+	data, err := services.GetMasoolReport(module, month)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, NewStandardResponse(false, 500, err.Error(), nil))
 		return
 	}
 
 	ctx.JSON(http.StatusOK, NewStandardResponse(true, 200, "Masool report fetched successfully", data))
+}
+
+func DeleteMasoolReport(ctx *gin.Context) {
+	moduleStr := ctx.Query("module")
+	if moduleStr == "" {
+		ctx.JSON(http.StatusBadRequest, NewStandardResponse(false, 400, "module is required", nil))
+		return
+	}
+
+	module, err := models.NewModuleString(moduleStr)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, NewStandardResponse(false, 400, "invalid module", nil))
+		return
+	}
+
+	err = services.DeleteMasoolReportsByModule(module)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, NewStandardResponse(false, 500, err.Error(), nil))
+		return
+	}
+
+	ctx.JSON(http.StatusOK, NewStandardResponse(true, 200, "Masool reports deleted successfully", nil))
 }
