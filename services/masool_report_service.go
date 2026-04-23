@@ -35,6 +35,7 @@ func UploadMasoolReport(file multipart.File, module models.Module) ([]models.Mas
 	}
 
 	var uploaded []models.MasoolReport
+	var currentReport *models.MasoolReport
 	currentMonth := time.Now().Format("2006_01")
 
 	for {
@@ -58,48 +59,95 @@ func UploadMasoolReport(file multipart.File, module models.Module) ([]models.Mas
 			continue
 		}
 
-		// Parse masool_id from the ID column
 		idStr := strings.TrimSpace(record[idIndex])
-		if idStr == "" {
-			return nil, fmt.Errorf("ID column cannot be empty")
-		}
-		masoolID, err := strconv.ParseUint(idStr, 10, 64)
-		if err != nil {
-			return nil, fmt.Errorf("invalid masool ID '%s': must be a valid number", idStr)
-		}
-
-		// Validate that the masool exists
-		var masool models.Masool
-		if err := db.DB.First(&masool, masoolID).Error; err != nil {
-			return nil, fmt.Errorf("masool with id %d not found", masoolID)
-		}
-
-		report := models.MasoolReport{
-			MasoolID: uint(masoolID),
-			Module:   module,
-			Month:    currentMonth,
-			Data:     make([]models.MasoolData, 0),
-		}
-
-		for i, val := range record {
-			if i == idIndex {
-				continue // Skip the ID column from data
+		if idStr != "" {
+			// Save the previous report if it exists
+			if currentReport != nil {
+				if err := db.DB.Create(currentReport).Error; err != nil {
+					return nil, fmt.Errorf("failed to save masool report to db: %v", err)
+				}
+				uploaded = append(uploaded, *currentReport)
 			}
-			val = strings.TrimSpace(val)
-			key := strings.TrimSpace(headers[i])
-			if i < len(headers) && key != "" {
-				report.Data = append(report.Data, models.MasoolData{
-					Key: key,
-					Val: val,
-				})
+
+			// Parse masool_id
+			masoolID, err := strconv.ParseUint(idStr, 10, 64)
+			if err != nil {
+				return nil, fmt.Errorf("invalid masool ID '%s': must be a valid number", idStr)
+			}
+
+			// Validate masool exists
+			var masool models.Masool
+			if err := db.DB.First(&masool, masoolID).Error; err != nil {
+				return nil, fmt.Errorf("masool with id %d not found", masoolID)
+			}
+
+			// Start a new report
+			currentReport = &models.MasoolReport{
+				MasoolID: uint(masoolID),
+				Module:   module,
+				Month:    currentMonth,
+				Data:     make([]models.MasoolData, 0),
+			}
+
+			// Add initial data
+			for i, val := range record {
+				val = strings.TrimSpace(val)
+				if val == "" || i == idIndex {
+					continue
+				}
+				key := strings.TrimSpace(headers[i])
+				if key != "" {
+					currentReport.Data = append(currentReport.Data, models.MasoolData{
+						Key: key,
+						Val: val,
+					})
+				}
+			}
+		} else if currentReport != nil {
+			// Continuation row
+			for i, val := range record {
+				val = strings.TrimSpace(val)
+				if val == "" || i == idIndex {
+					continue
+				}
+				key := strings.TrimSpace(headers[i])
+				if key == "" {
+					continue
+				}
+
+				// Find if the key already exists
+				found := false
+				for j := range currentReport.Data {
+					if strings.EqualFold(currentReport.Data[j].Key, key) {
+						switch existingVal := currentReport.Data[j].Val.(type) {
+						case []string:
+							currentReport.Data[j].Val = append(existingVal, val)
+						case string:
+							currentReport.Data[j].Val = []string{existingVal, val}
+						default:
+							currentReport.Data[j].Val = []string{fmt.Sprint(existingVal), val}
+						}
+						found = true
+						break
+					}
+				}
+
+				if !found {
+					currentReport.Data = append(currentReport.Data, models.MasoolData{
+						Key: key,
+						Val: val,
+					})
+				}
 			}
 		}
+	}
 
-		if err := db.DB.Create(&report).Error; err != nil {
+	// Save the last report
+	if currentReport != nil {
+		if err := db.DB.Create(currentReport).Error; err != nil {
 			return nil, fmt.Errorf("failed to save masool report to db: %v", err)
 		}
-
-		uploaded = append(uploaded, report)
+		uploaded = append(uploaded, *currentReport)
 	}
 
 	return uploaded, nil
