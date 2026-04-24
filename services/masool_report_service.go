@@ -171,7 +171,7 @@ func GetMasoolReport(module models.Module, month string) ([]map[string]interface
 
 	// 3. Fetch all masool reports for the given module
 	var reports []models.MasoolReport
-	query := db.DB.Where("module = ?", module)
+	query := db.DB.Where("module = ?", module).Order("id desc")
 	if month != "" {
 		query = query.Where("month = ?", month)
 	}
@@ -181,11 +181,18 @@ func GetMasoolReport(module models.Module, month string) ([]map[string]interface
 
 	// 4. Join and flatten the data
 	var result []map[string]interface{}
+	processedMasools := make(map[uint]bool)
+
 	for _, report := range reports {
 		masool, exists := masoolMap[report.MasoolID]
 		if !exists {
 			continue // skip reports with no matching masool
 		}
+
+		if processedMasools[report.MasoolID] {
+			continue // skip if we already added the latest report for this masool
+		}
+		processedMasools[report.MasoolID] = true
 
 		entry := make(map[string]interface{})
 		entry["id"] = masool.ID
