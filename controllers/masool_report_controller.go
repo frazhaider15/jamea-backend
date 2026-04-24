@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jamea/models"
@@ -86,4 +87,26 @@ func DeleteMasoolReport(ctx *gin.Context) {
 	}
 
 	ctx.JSON(http.StatusOK, NewStandardResponse(true, 200, "Masool reports deleted successfully", nil))
+}
+
+func GetPreviousMasoolReports(ctx *gin.Context) {
+	masoolIDStr := ctx.Query("masool_id")
+	if masoolIDStr == "" {
+		ctx.JSON(http.StatusBadRequest, NewStandardResponse(false, 400, "masool_id is required", nil))
+		return
+	}
+
+	masoolID, err := strconv.ParseUint(masoolIDStr, 10, 32)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, NewStandardResponse(false, 400, "invalid masool_id", nil))
+		return
+	}
+
+	data, err := services.GetPreviousMasoolReports(uint(masoolID))
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, NewStandardResponse(false, 500, err.Error(), nil))
+		return
+	}
+
+	ctx.JSON(http.StatusOK, NewStandardResponse(true, 200, "Previous masool reports fetched successfully", data))
 }

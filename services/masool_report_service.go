@@ -224,3 +224,66 @@ func GetMasoolReport(module models.Module, month string) ([]map[string]interface
 func DeleteMasoolReportsByModule(module models.Module) error {
 	return db.DB.Where("module = ?", module).Delete(&models.MasoolReport{}).Error
 }
+
+// GetPreviousMasoolReports fetches reports for previous months of the same year for a specific masool
+func GetPreviousMasoolReports(masoolID uint) ([]map[string]interface{}, error) {
+	currentMonth := time.Now().Format("2006_01")
+	parts := strings.Split(currentMonth, "_")
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("invalid month format, expected YYYY_MM")
+	}
+	year := parts[0]
+
+	// 1. Fetch the specific masool
+	var masool models.Masool
+	if err := db.DB.First(&masool, masoolID).Error; err != nil {
+		return nil, fmt.Errorf("masool with id %d not found: %v", masoolID, err)
+	}
+
+	// 2. Fetch all reports for this year strictly less than currentMonth
+	var reports []models.MasoolReport
+	query := db.DB.Where("masool_id = ?", masoolID).
+		Where("month LIKE ?", year+"_%").
+		Where("month < ?", currentMonth).
+		Order("id desc")
+
+	if err := query.Find(&reports).Error; err != nil {
+		return nil, fmt.Errorf("failed to fetch previous reports: %v", err)
+	}
+
+	// 3. Join and flatten
+	var result []map[string]interface{}
+	processedMonths := make(map[string]bool)
+
+	for _, report := range reports {
+		if processedMonths[report.Month] {
+			continue // skip if we already added the latest report for this month
+		}
+		processedMonths[report.Month] = true
+
+		entry := make(map[string]interface{})
+		entry["id"] = masool.ID
+		entry["name"] = masool.Name
+		entry["month"] = report.Month
+
+		// Add masool's key-val data
+		for _, d := range masool.Data {
+			k := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(d.Key), " ", "_"))
+			if k != "" && k != "name" && k != "id" {
+				entry[k] = d.Val
+			}
+		}
+
+		// Add/override with report's key-val data
+		for _, d := range report.Data {
+			k := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(d.Key), " ", "_"))
+			if k != "" {
+				entry[k] = d.Val
+			}
+		}
+
+		result = append(result, entry)
+	}
+
+	return result, nil
+}
