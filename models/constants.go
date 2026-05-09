@@ -2,6 +2,6 @@ package models
 
 const (
 	ModuleAms   = Module("AMS")
-	ModuleTbum = Module("TBUM")
+	ModuleTbum  = Module("TBUM")
 	ModulePtbum = Module("PTBUM")
 )

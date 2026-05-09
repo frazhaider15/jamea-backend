@@ -244,7 +244,7 @@ func GetPreviousMasoolReports(masoolID uint) ([]map[string]interface{}, error) {
 	var reports []models.MasoolReport
 	query := db.DB.Where("masool_id = ?", masoolID).
 		Where("month LIKE ?", year+"_%").
-		Where("month < ?", currentMonth).
+		Where("month <= ?", currentMonth).
 		Order("id desc")
 
 	if err := query.Find(&reports).Error; err != nil {

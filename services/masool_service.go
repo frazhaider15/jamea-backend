@@ -11,6 +11,13 @@ import (
 	"github.com/jamea/models"
 )
 
+// GetMasoolsByModule fetches all masools for a given module
+func GetMasoolsByModule(module models.Module) ([]models.Masool, error) {
+	var masools []models.Masool
+	err := db.DB.Where("module = ?", module).Find(&masools).Error
+	return masools, err
+}
+
 func UploadMasool(file multipart.File, module models.Module) ([]models.Masool, error) {
 	reader := csv.NewReader(file)
 
@@ -20,7 +27,7 @@ func UploadMasool(file multipart.File, module models.Module) ([]models.Masool, e
 		return nil, fmt.Errorf("failed to read CSV header: %v", err)
 	}
 
-	// Find the index of the "Name" column and "Longitude" column
+	// Find the index of the \"Name\" column and \"Longitude\" column
 	nameIndex := -1
 	longitudeIndex := -1
 	for i, h := range headers {
@@ -90,6 +97,7 @@ func UploadMasool(file multipart.File, module models.Module) ([]models.Masool, e
 
 	return uploaded, nil
 }
+
 func DeleteMasoolsByModule(module models.Module) error {
 	return db.DB.Where("module = ?", module).Delete(&models.Masool{}).Error
 }

@@ -25,6 +25,7 @@ func SetupRouter() *gin.Engine {
 		auth.POST("/login", controllers.Login)
 		auth.POST("/masool/upload", controllers.UploadMasool)
 		auth.DELETE("/masool", controllers.DeleteMasool)
+		auth.GET("/masool", controllers.GetMasools)
 		auth.POST("/masool-report/upload", controllers.UploadMasoolReport)
 		auth.GET("/masool-report", controllers.GetMasoolReport)
 		auth.GET("/masool-report/previous", controllers.GetPreviousMasoolReports)
