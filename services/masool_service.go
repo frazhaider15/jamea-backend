@@ -101,3 +101,35 @@ func UploadMasool(file multipart.File, module models.Module) ([]models.Masool, e
 func DeleteMasoolsByModule(module models.Module) error {
 	return db.DB.Where("module = ?", module).Delete(&models.Masool{}).Error
 }
+
+// CreateMasool creates a new masool
+func CreateMasool(masool *models.Masool) error {
+	return db.DB.Create(masool).Error
+}
+
+// GetMasoolByID fetches a masool by its ID
+func GetMasoolByID(id uint) (*models.Masool, error) {
+	var masool models.Masool
+	if err := db.DB.First(&masool, id).Error; err != nil {
+		return nil, err
+	}
+	return &masool, nil
+}
+
+// UpdateMasoolByID updates an existing masool's data by its ID
+func UpdateMasoolByID(id uint, data []models.MasoolData) (*models.Masool, error) {
+	var masool models.Masool
+	if err := db.DB.First(&masool, id).Error; err != nil {
+		return nil, err
+	}
+	masool.Data = data
+	if err := db.DB.Save(&masool).Error; err != nil {
+		return nil, err
+	}
+	return &masool, nil
+}
+
+// DeleteMasoolByID deletes a masool by its ID
+func DeleteMasoolByID(id uint) error {
+	return db.DB.Delete(&models.Masool{}, id).Error
+}

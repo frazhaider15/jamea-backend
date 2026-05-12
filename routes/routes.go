@@ -23,9 +23,13 @@ func SetupRouter() *gin.Engine {
 	auth := apisV1.Group("/jamea")
 	{
 		auth.POST("/login", controllers.Login)
+		auth.POST("/masool", controllers.CreateMasool)
 		auth.POST("/masool/upload", controllers.UploadMasool)
 		auth.DELETE("/masool", controllers.DeleteMasool)
 		auth.GET("/masool", controllers.GetMasools)
+		auth.GET("/masool/:id", controllers.GetMasool)
+		auth.PUT("/masool/:id", controllers.UpdateMasool)
+		auth.DELETE("/masool/:id", controllers.DeleteMasoolByID)
 		auth.POST("/masool-report/upload", controllers.UploadMasoolReport)
 		auth.GET("/masool-report", controllers.GetMasoolReport)
 		auth.GET("/masool-report/previous", controllers.GetPreviousMasoolReports)

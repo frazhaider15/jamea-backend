@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -94,4 +95,118 @@ func DeleteMasool(ctx *gin.Context) {
 	}
 
 	ctx.JSON(http.StatusOK, NewStandardResponse(true, 200, "Masool data deleted successfully", nil))
+}
+
+// CreateMasool handles POST /masool
+func CreateMasool(ctx *gin.Context) {
+	var body map[string]interface{}
+	if err := ctx.ShouldBindJSON(&body); err != nil {
+		ctx.JSON(http.StatusBadRequest, NewStandardResponse(false, 400, "invalid request body", nil))
+		return
+	}
+
+	name, _ := body["name"].(string)
+	moduleStr, _ := body["module"].(string)
+
+	if name == "" || moduleStr == "" {
+		ctx.JSON(http.StatusBadRequest, NewStandardResponse(false, 400, "name and module are required", nil))
+		return
+	}
+
+	module, err := models.NewModuleString(moduleStr)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, NewStandardResponse(false, 400, "invalid module", nil))
+		return
+	}
+
+	masool := models.Masool{
+		Name:   name,
+		Module: module,
+		Data:   make([]models.MasoolData, 0),
+	}
+
+	// Capture all other fields as dynamic data
+	for k, v := range body {
+		if k == "name" || k == "module" {
+			continue
+		}
+		masool.Data = append(masool.Data, models.MasoolData{
+			Key: k,
+			Val: v,
+		})
+	}
+
+	if err := services.CreateMasool(&masool); err != nil {
+		ctx.JSON(http.StatusInternalServerError, NewStandardResponse(false, 500, err.Error(), nil))
+		return
+	}
+
+	ctx.JSON(http.StatusCreated, NewStandardResponse(true, 201, "Masool created successfully", masool))
+}
+
+// GetMasool handles GET /masool/:id
+func GetMasool(ctx *gin.Context) {
+	idStr := ctx.Param("id")
+	var id uint
+	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
+		ctx.JSON(http.StatusBadRequest, NewStandardResponse(false, 400, "invalid ID", nil))
+		return
+	}
+
+	masool, err := services.GetMasoolByID(id)
+	if err != nil {
+		ctx.JSON(http.StatusNotFound, NewStandardResponse(false, 404, "Masool not found", nil))
+		return
+	}
+
+	ctx.JSON(http.StatusOK, NewStandardResponse(true, 200, "Masool fetched successfully", masool))
+}
+
+// UpdateMasool handles PUT /masool/:id
+func UpdateMasool(ctx *gin.Context) {
+	idStr := ctx.Param("id")
+	var id uint
+	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
+		ctx.JSON(http.StatusBadRequest, NewStandardResponse(false, 400, "invalid ID", nil))
+		return
+	}
+
+	var body map[string]interface{}
+	if err := ctx.ShouldBindJSON(&body); err != nil {
+		ctx.JSON(http.StatusBadRequest, NewStandardResponse(false, 400, "invalid request body", nil))
+		return
+	}
+
+	var data []models.MasoolData
+	for k, v := range body {
+		data = append(data, models.MasoolData{
+			Key: k,
+			Val: v,
+		})
+	}
+
+	masool, err := services.UpdateMasoolByID(id, data)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, NewStandardResponse(false, 500, err.Error(), nil))
+		return
+	}
+
+	ctx.JSON(http.StatusOK, NewStandardResponse(true, 200, "Masool updated successfully", masool))
+}
+
+// DeleteMasoolByID handles DELETE /masool/:id
+func DeleteMasoolByID(ctx *gin.Context) {
+	idStr := ctx.Param("id")
+	var id uint
+	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
+		ctx.JSON(http.StatusBadRequest, NewStandardResponse(false, 400, "invalid ID", nil))
+		return
+	}
+
+	if err := services.DeleteMasoolByID(id); err != nil {
+		ctx.JSON(http.StatusInternalServerError, NewStandardResponse(false, 500, err.Error(), nil))
+		return
+	}
+
+	ctx.JSON(http.StatusOK, NewStandardResponse(true, 200, "Masool deleted successfully", nil))
 }
