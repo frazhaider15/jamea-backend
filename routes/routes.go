@@ -37,6 +37,9 @@ func SetupRouter() *gin.Engine {
 		auth.POST("/activities", controllers.PostActivities)
 		auth.GET("/activities", controllers.GetActivities)
 		auth.DELETE("/activities", controllers.DeleteActivities)
+		auth.GET("/default-activities", controllers.GetDefaultActivities)
+		auth.POST("/default-activities", controllers.AddDefaultActivity)
+		auth.GET("/last-activities", controllers.GetLastActivities)
 	}
 	return r
 }

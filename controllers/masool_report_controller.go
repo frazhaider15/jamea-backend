@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -41,6 +42,7 @@ func UploadMasoolReport(ctx *gin.Context) {
 		return
 	}
 
+	services.LogUserActivity(module, "upload_masool_report", fmt.Sprintf("Uploaded %d Masool report record(s)", len(data)))
 	ctx.JSON(http.StatusOK, NewStandardResponse(true, 200, "Masool report data uploaded successfully", data))
 }
 
@@ -86,6 +88,7 @@ func DeleteMasoolReport(ctx *gin.Context) {
 		return
 	}
 
+	services.LogUserActivity(module, "delete_masool_report", "Deleted all Masool reports")
 	ctx.JSON(http.StatusOK, NewStandardResponse(true, 200, "Masool reports deleted successfully", nil))
 }
 

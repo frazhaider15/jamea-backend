@@ -72,6 +72,7 @@ func UploadMasool(ctx *gin.Context) {
 		return
 	}
 
+	services.LogUserActivity(module, "upload_masool", fmt.Sprintf("Uploaded %d Masool record(s)", len(data)))
 	ctx.JSON(http.StatusOK, NewStandardResponse(true, 200, "Masool data uploaded successfully", data))
 }
 
@@ -94,6 +95,7 @@ func DeleteMasool(ctx *gin.Context) {
 		return
 	}
 
+	services.LogUserActivity(module, "delete_masool", "Deleted all Masool data")
 	ctx.JSON(http.StatusOK, NewStandardResponse(true, 200, "Masool data deleted successfully", nil))
 }
 
@@ -141,6 +143,7 @@ func CreateMasool(ctx *gin.Context) {
 		return
 	}
 
+	services.LogUserActivity(module, "create_masool", "Created Masool: "+name)
 	ctx.JSON(http.StatusCreated, NewStandardResponse(true, 201, "Masool created successfully", masool))
 }
 
@@ -191,6 +194,7 @@ func UpdateMasool(ctx *gin.Context) {
 		return
 	}
 
+	services.LogUserActivity(masool.Module, "update_masool", "Updated Masool: "+masool.Name)
 	ctx.JSON(http.StatusOK, NewStandardResponse(true, 200, "Masool updated successfully", masool))
 }
 
@@ -203,10 +207,17 @@ func DeleteMasoolByID(ctx *gin.Context) {
 		return
 	}
 
+	masool, err := services.GetMasoolByID(id)
+	if err != nil {
+		ctx.JSON(http.StatusNotFound, NewStandardResponse(false, 404, "Masool not found", nil))
+		return
+	}
+
 	if err := services.DeleteMasoolByID(id); err != nil {
 		ctx.JSON(http.StatusInternalServerError, NewStandardResponse(false, 500, err.Error(), nil))
 		return
 	}
 
+	services.LogUserActivity(masool.Module, "delete_masool", "Deleted Masool: "+masool.Name)
 	ctx.JSON(http.StatusOK, NewStandardResponse(true, 200, "Masool deleted successfully", nil))
 }

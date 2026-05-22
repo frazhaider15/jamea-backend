@@ -30,6 +30,7 @@ func PostActivities(ctx *gin.Context) {
 		return
 	}
 
+	services.LogUserActivity(req.Module, "save_activities", "Saved activities")
 	ctx.JSON(http.StatusOK, NewStandardResponse(true, 200, "Activities saved successfully", data))
 }
 
@@ -38,8 +39,8 @@ func GetActivities(ctx *gin.Context) {
 	monthStr := ctx.Query("month")
 	yearStr := ctx.Query("year")
 
-	if moduleStr == "" || monthStr == "" || yearStr == "" {
-		ctx.JSON(http.StatusBadRequest, NewStandardResponse(false, 400, "module, month, and year are required", nil))
+	if moduleStr == "" {
+		ctx.JSON(http.StatusBadRequest, NewStandardResponse(false, 400, "module is required", nil))
 		return
 	}
 
@@ -49,21 +50,27 @@ func GetActivities(ctx *gin.Context) {
 		return
 	}
 
-	month, err := strconv.Atoi(monthStr)
-	if err != nil {
-		ctx.JSON(http.StatusBadRequest, NewStandardResponse(false, 400, "invalid month", nil))
-		return
+	month := 0
+	if monthStr != "" {
+		month, err = strconv.Atoi(monthStr)
+		if err != nil {
+			ctx.JSON(http.StatusBadRequest, NewStandardResponse(false, 400, "invalid month", nil))
+			return
+		}
 	}
 
-	year, err := strconv.Atoi(yearStr)
-	if err != nil {
-		ctx.JSON(http.StatusBadRequest, NewStandardResponse(false, 400, "invalid year", nil))
-		return
+	year := 0
+	if yearStr != "" {
+		year, err = strconv.Atoi(yearStr)
+		if err != nil {
+			ctx.JSON(http.StatusBadRequest, NewStandardResponse(false, 400, "invalid year", nil))
+			return
+		}
 	}
 
 	data, err := services.GetActivities(module, month, year)
 	if err != nil {
-		ctx.JSON(http.StatusNotFound, NewStandardResponse(false, 404, "activities not found: "+err.Error(), nil))
+		ctx.JSON(http.StatusInternalServerError, NewStandardResponse(false, 500, "failed to fetch activities: "+err.Error(), nil))
 		return
 	}
 
@@ -89,5 +96,6 @@ func DeleteActivities(ctx *gin.Context) {
 		return
 	}
 
+	services.LogUserActivity(module, "delete_activities", "Deleted all activities")
 	ctx.JSON(http.StatusOK, NewStandardResponse(true, 200, "Activities deleted successfully", nil))
 }

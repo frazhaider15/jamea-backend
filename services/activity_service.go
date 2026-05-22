@@ -25,10 +25,17 @@ func SaveActivities(activity models.Activity) (models.Activity, error) {
 	return activity, nil
 }
 
-func GetActivities(module models.Module, month, year int) (models.Activity, error) {
-	var activity models.Activity
-	err := db.DB.Where("module = ? AND month = ? AND year = ?", module, month, year).First(&activity).Error
-	return activity, err
+func GetActivities(module models.Module, month, year int) ([]models.Activity, error) {
+	var activities []models.Activity
+	query := db.DB.Where("module = ?", module)
+	if month != 0 {
+		query = query.Where("month = ?", month)
+	}
+	if year != 0 {
+		query = query.Where("year = ?", year)
+	}
+	err := query.Find(&activities).Error
+	return activities, err
 }
 func DeleteActivitiesByModule(module models.Module) error {
 	return db.DB.Where("module = ?", module).Delete(&models.Activity{}).Error
