@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jamea/models"
@@ -59,8 +60,19 @@ func GetMasoolReport(ctx *gin.Context) {
 		return
 	}
 
+	filters := make(map[string]string)
+	for param, dataKey := range previousReportFilterKeys {
+		if v := strings.TrimSpace(ctx.Query(param)); v != "" {
+			filters[dataKey] = v
+		}
+	}
+	if len(filters) > 1 {
+		ctx.JSON(http.StatusBadRequest, NewStandardResponse(false, 400, "only one of province, division, district, tehsil may be passed at a time", nil))
+		return
+	}
+
 	month := ctx.Query("month")
-	data, err := services.GetMasoolReport(module, month)
+	data, err := services.GetMasoolReport(module, month, filters)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, NewStandardResponse(false, 500, err.Error(), nil))
 		return
@@ -92,20 +104,50 @@ func DeleteMasoolReport(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, NewStandardResponse(true, 200, "Masool reports deleted successfully", nil))
 }
 
+// previousReportFilterKeys maps query-param names to the actual key names
+// stored inside masool.Data so callers can use lowercase params.
+var previousReportFilterKeys = map[string]string{
+	"province": "Province",
+	"division": "Division",
+	"district": "District",
+	"tehsil":   "Tehsil",
+}
+
 func GetPreviousMasoolReports(ctx *gin.Context) {
-	masoolIDStr := ctx.Query("masool_id")
-	if masoolIDStr == "" {
-		ctx.JSON(http.StatusBadRequest, NewStandardResponse(false, 400, "masool_id is required", nil))
+	masoolIDStr := strings.TrimSpace(ctx.Query("masool_id"))
+
+	filters := make(map[string]string)
+	for param, dataKey := range previousReportFilterKeys {
+		if v := strings.TrimSpace(ctx.Query(param)); v != "" {
+			filters[dataKey] = v
+		}
+	}
+
+	// Exactly one selector must be provided.
+	provided := len(filters)
+	if masoolIDStr != "" {
+		provided++
+	}
+	if provided == 0 {
+		ctx.JSON(http.StatusBadRequest, NewStandardResponse(false, 400, "exactly one of masool_id, province, division, district, tehsil is required", nil))
+		return
+	}
+	if provided > 1 {
+		ctx.JSON(http.StatusBadRequest, NewStandardResponse(false, 400, "only one of masool_id, province, division, district, tehsil may be passed at a time", nil))
 		return
 	}
 
-	masoolID, err := strconv.ParseUint(masoolIDStr, 10, 32)
-	if err != nil {
-		ctx.JSON(http.StatusBadRequest, NewStandardResponse(false, 400, "invalid masool_id", nil))
-		return
+	var masoolID uint
+	if masoolIDStr != "" {
+		parsed, err := strconv.ParseUint(masoolIDStr, 10, 32)
+		if err != nil {
+			ctx.JSON(http.StatusBadRequest, NewStandardResponse(false, 400, "invalid masool_id", nil))
+			return
+		}
+		masoolID = uint(parsed)
 	}
 
-	data, err := services.GetPreviousMasoolReports(uint(masoolID))
+	data, err := services.GetPreviousMasoolReports(masoolID, filters)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, NewStandardResponse(false, 500, err.Error(), nil))
 		return

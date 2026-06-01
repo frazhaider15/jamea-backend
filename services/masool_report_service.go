@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -12,6 +13,22 @@ import (
 	"github.com/jamea/db"
 	"github.com/jamea/models"
 )
+
+// monthRangeRE matches "YYYY_MM-YYYY_MM"; the two capture groups are the
+// inclusive start and end months of a range filter.
+var monthRangeRE = regexp.MustCompile(`^(\d{4}_\d{2})-(\d{4}_\d{2})$`)
+
+// parseMonthFilter inspects a month query value. If it matches the range form
+// "YYYY_MM-YYYY_MM" it returns the two endpoints with isRange=true; otherwise
+// it returns isRange=false and the caller should treat the value as an exact
+// match (existing behaviour).
+func parseMonthFilter(s string) (start, end string, isRange bool) {
+	m := monthRangeRE.FindStringSubmatch(strings.TrimSpace(s))
+	if m == nil {
+		return "", "", false
+	}
+	return m[1], m[2], true
+}
 
 func UploadMasoolReport(file multipart.File, module models.Module) ([]models.MasoolReport, error) {
 	reader := csv.NewReader(file)
@@ -156,24 +173,36 @@ func UploadMasoolReport(file multipart.File, module models.Module) ([]models.Mas
 // GetMasoolReport fetches all masools along with their associated report data.
 // It matches masool.id with masool_reports.masool_id and flattens the JSONB
 // key-val data from both tables into a single flat response per report.
-func GetMasoolReport(module models.Module, month string) ([]map[string]interface{}, error) {
+// When filters is non-empty, only masools whose Data matches every key/val
+// pair (case-insensitive) are included.
+func GetMasoolReport(module models.Module, month string, filters map[string]string) ([]map[string]interface{}, error) {
 	// 1. Fetch all masools for the given module
 	var masools []models.Masool
 	if err := db.DB.Where("module = ?", module).Find(&masools).Error; err != nil {
 		return nil, fmt.Errorf("failed to fetch masools: %v", err)
 	}
 
-	// 2. Build a lookup map: masool ID -> Masool
+	// 2. Apply geographic filters, then build a lookup map: masool ID -> Masool
 	masoolMap := make(map[uint]models.Masool)
 	for _, m := range masools {
+		if len(filters) > 0 && !masoolMatchesFilters(m, filters) {
+			continue
+		}
 		masoolMap[m.ID] = m
+	}
+	if len(masoolMap) == 0 {
+		return []map[string]interface{}{}, nil
 	}
 
 	// 3. Fetch all masool reports for the given module
 	var reports []models.MasoolReport
 	query := db.DB.Where("module = ?", module).Order("id desc")
 	if month != "" {
-		query = query.Where("month = ?", month)
+		if start, end, isRange := parseMonthFilter(month); isRange {
+			query = query.Where("month >= ?", start).Where("month <= ?", end)
+		} else {
+			query = query.Where("month = ?", month)
+		}
 	}
 	if err := query.Find(&reports).Error; err != nil {
 		return nil, fmt.Errorf("failed to fetch masool reports: %v", err)
@@ -225,8 +254,14 @@ func DeleteMasoolReportsByModule(module models.Module) error {
 	return db.DB.Where("module = ?", module).Delete(&models.MasoolReport{}).Error
 }
 
-// GetPreviousMasoolReports fetches reports for previous months of the same year for a specific masool
-func GetPreviousMasoolReports(masoolID uint) ([]map[string]interface{}, error) {
+// GetPreviousMasoolReports fetches reports for previous months of the same year.
+// Selectors (one or more, mutually combinable):
+//   - masoolID > 0  : restrict to that masool
+//   - filters       : map of masool.Data key -> value (case-insensitive match);
+//                     only masools whose Data contains ALL given key/val pairs match
+//
+// If only filters are given, every matching masool's previous reports are returned.
+func GetPreviousMasoolReports(masoolID uint, filters map[string]string) ([]map[string]interface{}, error) {
 	currentMonth := time.Now().Format("2006_01")
 	parts := strings.Split(currentMonth, "_")
 	if len(parts) != 2 {
@@ -234,51 +269,86 @@ func GetPreviousMasoolReports(masoolID uint) ([]map[string]interface{}, error) {
 	}
 	year := parts[0]
 
-	// 1. Fetch the specific masool
-	var masool models.Masool
-	if err := db.DB.First(&masool, masoolID).Error; err != nil {
-		return nil, fmt.Errorf("masool with id %d not found: %v", masoolID, err)
+	// 1. Resolve the set of masools to include.
+	var masools []models.Masool
+	switch {
+	case masoolID != 0:
+		var m models.Masool
+		if err := db.DB.First(&m, masoolID).Error; err != nil {
+			return nil, fmt.Errorf("masool with id %d not found: %v", masoolID, err)
+		}
+		if len(filters) > 0 && !masoolMatchesFilters(m, filters) {
+			return []map[string]interface{}{}, nil
+		}
+		masools = []models.Masool{m}
+	case len(filters) > 0:
+		var all []models.Masool
+		if err := db.DB.Find(&all).Error; err != nil {
+			return nil, fmt.Errorf("failed to fetch masools: %v", err)
+		}
+		for _, m := range all {
+			if masoolMatchesFilters(m, filters) {
+				masools = append(masools, m)
+			}
+		}
+		if len(masools) == 0 {
+			return []map[string]interface{}{}, nil
+		}
+	default:
+		return nil, fmt.Errorf("masool_id or at least one filter is required")
 	}
 
-	// 2. Fetch all reports for this year strictly less than currentMonth
+	// 2. Fetch all previous reports for the selected masools.
+	masoolMap := make(map[uint]models.Masool, len(masools))
+	ids := make([]uint, 0, len(masools))
+	for _, m := range masools {
+		masoolMap[m.ID] = m
+		ids = append(ids, m.ID)
+	}
+
 	var reports []models.MasoolReport
-	query := db.DB.Where("masool_id = ?", masoolID).
+	if err := db.DB.Where("masool_id IN ?", ids).
 		Where("month LIKE ?", year+"_%").
 		Where("month <= ?", currentMonth).
-		Order("id desc")
-
-	if err := query.Find(&reports).Error; err != nil {
+		Order("id desc").
+		Find(&reports).Error; err != nil {
 		return nil, fmt.Errorf("failed to fetch previous reports: %v", err)
 	}
 
-	// 3. Join and flatten
+	// 3. Flatten, deduping by (masoolID, month) — keep the latest per pair.
+	type monthKey struct {
+		masoolID uint
+		month    string
+	}
+	processed := make(map[monthKey]bool)
 	var result []map[string]interface{}
-	processedMonths := make(map[string]bool)
 
 	for _, report := range reports {
-		if processedMonths[report.Month] {
-			continue // skip if we already added the latest report for this month
+		masool, ok := masoolMap[report.MasoolID]
+		if !ok {
+			continue
 		}
-		processedMonths[report.Month] = true
+		k := monthKey{report.MasoolID, report.Month}
+		if processed[k] {
+			continue
+		}
+		processed[k] = true
 
 		entry := make(map[string]interface{})
 		entry["id"] = masool.ID
 		entry["name"] = masool.Name
 		entry["month"] = report.Month
 
-		// Add masool's key-val data
 		for _, d := range masool.Data {
-			k := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(d.Key), " ", "_"))
-			if k != "" && k != "name" && k != "id" {
-				entry[k] = d.Val
+			kk := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(d.Key), " ", "_"))
+			if kk != "" && kk != "name" && kk != "id" {
+				entry[kk] = d.Val
 			}
 		}
-
-		// Add/override with report's key-val data
 		for _, d := range report.Data {
-			k := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(d.Key), " ", "_"))
-			if k != "" {
-				entry[k] = d.Val
+			kk := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(d.Key), " ", "_"))
+			if kk != "" {
+				entry[kk] = d.Val
 			}
 		}
 
@@ -286,4 +356,33 @@ func GetPreviousMasoolReports(masoolID uint) ([]map[string]interface{}, error) {
 	}
 
 	return result, nil
+}
+
+// masoolMatchesFilters returns true when the masool's Data contains every
+// key/value pair in filters. Key and value matching is case-insensitive so
+// callers can pass lowercase query params against capitalised stored keys.
+func masoolMatchesFilters(masool models.Masool, filters map[string]string) bool {
+	if len(filters) == 0 {
+		return true
+	}
+	dataMap := make(map[string]string, len(masool.Data))
+	for _, d := range masool.Data {
+		key := strings.ToLower(strings.TrimSpace(d.Key))
+		if key == "" {
+			continue
+		}
+		switch v := d.Val.(type) {
+		case string:
+			dataMap[key] = v
+		default:
+			dataMap[key] = fmt.Sprintf("%v", v)
+		}
+	}
+	for fk, fv := range filters {
+		got, ok := dataMap[strings.ToLower(fk)]
+		if !ok || !strings.EqualFold(got, fv) {
+			return false
+		}
+	}
+	return true
 }

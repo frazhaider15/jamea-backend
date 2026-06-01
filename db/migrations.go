@@ -2,6 +2,7 @@ package db
 
 import (
 	"log"
+	"strings"
 
 	"github.com/jamea/models"
 )
@@ -13,6 +14,7 @@ func Migrate() {
 	}
 
 	seedDefaultActivities()
+	normalizeMasoolsData()
 
 	var count int64
 	DB.Model(&models.Masool{}).Where("id = ?", 40).Count(&count)
@@ -114,6 +116,78 @@ func Migrate() {
 	log.Println("Seeded previous months reports for Masools 4-14")
 
 	log.Println("Database migration completed")
+}
+
+// normalizeMasoolsData rewrites any masools.data rows that were stored in the
+// legacy wrapped shape (a {"key":"data","val":[...]} entry, optionally next to
+// name/module entries) into the flat shape used by CSV uploads. Idempotent —
+// rows already in the flat shape are left untouched.
+func normalizeMasoolsData() {
+	var masools []models.Masool
+	if err := DB.Find(&masools).Error; err != nil {
+		log.Printf("normalizeMasoolsData: failed to load masools: %v\n", err)
+		return
+	}
+	fixed := 0
+	for i := range masools {
+		normalized, changed := unwrapNestedMasoolData(masools[i].Name, masools[i].Data)
+		if !changed {
+			continue
+		}
+		masools[i].Data = normalized
+		if err := DB.Save(&masools[i]).Error; err != nil {
+			log.Printf("normalizeMasoolsData: failed to save masool %d: %v\n", masools[i].ID, err)
+			continue
+		}
+		fixed++
+	}
+	if fixed > 0 {
+		log.Printf("Normalized data shape for %d masool(s)\n", fixed)
+	}
+}
+
+func unwrapNestedMasoolData(name string, data []models.MasoolData) ([]models.MasoolData, bool) {
+	var inner []models.MasoolData
+	found := false
+
+	for _, entry := range data {
+		if !strings.EqualFold(strings.TrimSpace(entry.Key), "data") {
+			continue
+		}
+		switch v := entry.Val.(type) {
+		case []interface{}:
+			for _, item := range v {
+				m, ok := item.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				k, _ := m["key"].(string)
+				if strings.TrimSpace(k) == "" {
+					continue
+				}
+				inner = append(inner, models.MasoolData{Key: k, Val: m["val"]})
+			}
+			found = true
+		case []models.MasoolData:
+			inner = v
+			found = true
+		}
+		break
+	}
+
+	if !found {
+		return data, false
+	}
+
+	normalized := []models.MasoolData{{Key: "Name", Val: name}}
+	for _, entry := range inner {
+		kl := strings.ToLower(strings.TrimSpace(entry.Key))
+		if kl == "" || kl == "name" || kl == "module" {
+			continue
+		}
+		normalized = append(normalized, entry)
+	}
+	return normalized, true
 }
 
 // seedDefaultActivities inserts the built-in activities with their colors,

@@ -3,11 +3,45 @@ package controllers
 import (
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jamea/models"
 	"github.com/jamea/services"
 )
+
+// buildMasoolDataFromBody turns a JSON body into the flat masool.Data shape
+// used by CSV uploads. If the body wraps the fields inside {"data":[...]},
+// that array is unwrapped; otherwise the body's top-level keys are used.
+// `name`/`module` are always skipped (they belong to the Masool struct fields).
+func buildMasoolDataFromBody(body map[string]interface{}) []models.MasoolData {
+	var out []models.MasoolData
+
+	if raw, ok := body["data"].([]interface{}); ok {
+		for _, item := range raw {
+			m, ok := item.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			k, _ := m["key"].(string)
+			kl := strings.ToLower(strings.TrimSpace(k))
+			if kl == "" || kl == "name" || kl == "module" {
+				continue
+			}
+			out = append(out, models.MasoolData{Key: k, Val: m["val"]})
+		}
+		return out
+	}
+
+	for k, v := range body {
+		kl := strings.ToLower(strings.TrimSpace(k))
+		if kl == "name" || kl == "module" || kl == "data" {
+			continue
+		}
+		out = append(out, models.MasoolData{Key: k, Val: v})
+	}
+	return out
+}
 
 // GetMasools handles GET /masool?module=MODULE
 func GetMasools(ctx *gin.Context) {
@@ -124,18 +158,7 @@ func CreateMasool(ctx *gin.Context) {
 	masool := models.Masool{
 		Name:   name,
 		Module: module,
-		Data:   make([]models.MasoolData, 0),
-	}
-
-	// Capture all other fields as dynamic data
-	for k, v := range body {
-		if k == "name" || k == "module" {
-			continue
-		}
-		masool.Data = append(masool.Data, models.MasoolData{
-			Key: k,
-			Val: v,
-		})
+		Data:   append([]models.MasoolData{{Key: "Name", Val: name}}, buildMasoolDataFromBody(body)...),
 	}
 
 	if err := services.CreateMasool(&masool); err != nil {
@@ -180,13 +203,7 @@ func UpdateMasool(ctx *gin.Context) {
 		return
 	}
 
-	var data []models.MasoolData
-	for k, v := range body {
-		data = append(data, models.MasoolData{
-			Key: k,
-			Val: v,
-		})
-	}
+	data := buildMasoolDataFromBody(body)
 
 	masool, err := services.UpdateMasoolByID(id, data)
 	if err != nil {
