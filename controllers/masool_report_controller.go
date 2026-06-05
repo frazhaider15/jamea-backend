@@ -67,7 +67,7 @@ func GetMasoolReport(ctx *gin.Context) {
 		}
 	}
 	if len(filters) > 1 {
-		ctx.JSON(http.StatusBadRequest, NewStandardResponse(false, 400, "only one of province, division, district, tehsil may be passed at a time", nil))
+		ctx.JSON(http.StatusBadRequest, NewStandardResponse(false, 400, "only one of province, division, district, tehsil, area may be passed at a time", nil))
 		return
 	}
 
@@ -111,6 +111,7 @@ var previousReportFilterKeys = map[string]string{
 	"division": "Division",
 	"district": "District",
 	"tehsil":   "Tehsil",
+	"area":     "Area",
 }
 
 func GetPreviousMasoolReports(ctx *gin.Context) {
@@ -129,11 +130,11 @@ func GetPreviousMasoolReports(ctx *gin.Context) {
 		provided++
 	}
 	if provided == 0 {
-		ctx.JSON(http.StatusBadRequest, NewStandardResponse(false, 400, "exactly one of masool_id, province, division, district, tehsil is required", nil))
+		ctx.JSON(http.StatusBadRequest, NewStandardResponse(false, 400, "exactly one of masool_id, province, division, district, tehsil, area is required", nil))
 		return
 	}
 	if provided > 1 {
-		ctx.JSON(http.StatusBadRequest, NewStandardResponse(false, 400, "only one of masool_id, province, division, district, tehsil may be passed at a time", nil))
+		ctx.JSON(http.StatusBadRequest, NewStandardResponse(false, 400, "only one of masool_id, province, division, district, tehsil, area may be passed at a time", nil))
 		return
 	}
 
