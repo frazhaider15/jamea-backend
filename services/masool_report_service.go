@@ -277,7 +277,7 @@ func GetPreviousMasoolReports(masoolID uint, filters map[string]string) ([]map[s
 		if err := db.DB.First(&m, masoolID).Error; err != nil {
 			return nil, fmt.Errorf("masool with id %d not found: %v", masoolID, err)
 		}
-		if len(filters) > 0 && !masoolMatchesFilters(m, filters) {
+		if len(filters) > 0 && !masoolMatchesHierarchyFilters(m, filters) {
 			return []map[string]interface{}{}, nil
 		}
 		masools = []models.Masool{m}
@@ -287,7 +287,7 @@ func GetPreviousMasoolReports(masoolID uint, filters map[string]string) ([]map[s
 			return nil, fmt.Errorf("failed to fetch masools: %v", err)
 		}
 		for _, m := range all {
-			if masoolMatchesFilters(m, filters) {
+			if masoolMatchesHierarchyFilters(m, filters) {
 				masools = append(masools, m)
 			}
 		}
@@ -356,6 +356,76 @@ func GetPreviousMasoolReports(masoolID uint, filters map[string]string) ([]map[s
 	}
 
 	return result, nil
+}
+
+// geoHierarchy lists the geographic levels from broadest to narrowest.
+// A masool selected at a given level must have every level below it empty, so
+// that e.g. a province search returns only province-level masools and not the
+// districts/tehsils/areas that also carry that province name.
+var geoHierarchy = []string{"province", "division", "district", "tehsil", "area"}
+
+// geoLevelIndex returns the position of key within geoHierarchy, or -1 if key
+// is not a geographic level.
+func geoLevelIndex(key string) int {
+	for i, level := range geoHierarchy {
+		if level == key {
+			return i
+		}
+	}
+	return -1
+}
+
+// flattenMasoolData turns a masool's Data into a lowercase key -> string value
+// lookup so filters can be matched case-insensitively.
+func flattenMasoolData(masool models.Masool) map[string]string {
+	dataMap := make(map[string]string, len(masool.Data))
+	for _, d := range masool.Data {
+		key := strings.ToLower(strings.TrimSpace(d.Key))
+		if key == "" {
+			continue
+		}
+		switch v := d.Val.(type) {
+		case string:
+			dataMap[key] = v
+		default:
+			dataMap[key] = fmt.Sprintf("%v", v)
+		}
+	}
+	return dataMap
+}
+
+// masoolMatchesHierarchyFilters is the hierarchy-aware matcher used by the
+// previous-reports endpoint. The filtered geographic level must equal the
+// requested value (case-insensitive) AND every level below it in the
+// province > division > district > tehsil > area hierarchy must be empty.
+// Levels above the filtered one may hold any value. Non-geographic filter keys
+// fall back to a plain equality match.
+func masoolMatchesHierarchyFilters(masool models.Masool, filters map[string]string) bool {
+	if len(filters) == 0 {
+		return true
+	}
+
+	dataMap := flattenMasoolData(masool)
+
+	for fk, fv := range filters {
+		lfk := strings.ToLower(fk)
+
+		// The filtered level itself must match the requested value.
+		got, ok := dataMap[lfk]
+		if !ok || !strings.EqualFold(strings.TrimSpace(got), strings.TrimSpace(fv)) {
+			return false
+		}
+
+		// For geographic filters, every level below the filtered one must be empty.
+		if level := geoLevelIndex(lfk); level >= 0 {
+			for _, lower := range geoHierarchy[level+1:] {
+				if strings.TrimSpace(dataMap[lower]) != "" {
+					return false
+				}
+			}
+		}
+	}
+	return true
 }
 
 // masoolMatchesFilters returns true when the masool's Data contains every
