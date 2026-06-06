@@ -91,6 +91,9 @@ func UploadMasool(file multipart.File, module models.Module) ([]models.Masool, e
 		if err := db.DB.Create(&masool).Error; err != nil {
 			return nil, fmt.Errorf("failed to save masool to db: %v", err)
 		}
+		if err := RecordMasoolLocation(masool); err != nil {
+			return nil, fmt.Errorf("failed to record masool location: %v", err)
+		}
 
 		uploaded = append(uploaded, masool)
 	}
@@ -104,7 +107,10 @@ func DeleteMasoolsByModule(module models.Module) error {
 
 // CreateMasool creates a new masool
 func CreateMasool(masool *models.Masool) error {
-	return db.DB.Create(masool).Error
+	if err := db.DB.Create(masool).Error; err != nil {
+		return err
+	}
+	return RecordMasoolLocation(*masool)
 }
 
 // GetMasoolByID fetches a masool by its ID
@@ -124,6 +130,9 @@ func UpdateMasoolByID(id uint, data []models.MasoolData) (*models.Masool, error)
 	}
 	masool.Data = data
 	if err := db.DB.Save(&masool).Error; err != nil {
+		return nil, err
+	}
+	if err := RecordMasoolLocation(masool); err != nil {
 		return nil, err
 	}
 	return &masool, nil

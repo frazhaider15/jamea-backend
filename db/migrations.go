@@ -8,7 +8,7 @@ import (
 )
 
 func Migrate() {
-	err := DB.AutoMigrate(&models.User{}, &models.Masool{}, &models.MasoolReport{}, &models.Activity{}, &models.DefaultActivity{}, &models.UserActivityLog{})
+	err := DB.AutoMigrate(&models.User{}, &models.Masool{}, &models.MasoolReport{}, &models.MasoolLocation{}, &models.Activity{}, &models.DefaultActivity{}, &models.UserActivityLog{})
 	if err != nil {
 		log.Fatal("Failed to migrate database: ", err)
 	}
@@ -115,7 +115,43 @@ func Migrate() {
 	}
 	log.Println("Seeded previous months reports for Masools 4-14")
 
+	backfillMasoolLocations()
+
 	log.Println("Database migration completed")
+}
+
+// backfillMasoolLocations seeds the location history for any masool that has no
+// period yet, using the masool's CURRENT geography as an open-ended period that
+// starts "from the beginning of time" (EffectiveFrom == ""). This covers all of
+// a masool's pre-existing reports. It is correct only as long as no masool has
+// already been reassigned to a different area before this runs; after the first
+// real reassignment, RecordMasoolLocation splits the period instead. The pass is
+// idempotent — masools that already have any location row are skipped.
+func backfillMasoolLocations() {
+	var masools []models.Masool
+	if err := DB.Find(&masools).Error; err != nil {
+		log.Printf("backfillMasoolLocations: failed to load masools: %v\n", err)
+		return
+	}
+	created := 0
+	for _, m := range masools {
+		var count int64
+		DB.Model(&models.MasoolLocation{}).Where("masool_id = ?", m.ID).Count(&count)
+		if count > 0 {
+			continue
+		}
+		loc := models.LocationFrom(m)
+		loc.EffectiveFrom = ""
+		loc.EffectiveTo = ""
+		if err := DB.Create(&loc).Error; err != nil {
+			log.Printf("backfillMasoolLocations: failed for masool %d: %v\n", m.ID, err)
+			continue
+		}
+		created++
+	}
+	if created > 0 {
+		log.Printf("Backfilled location history for %d masool(s)\n", created)
+	}
 }
 
 // normalizeMasoolsData rewrites any masools.data rows that were stored in the

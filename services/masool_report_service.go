@@ -255,12 +255,15 @@ func DeleteMasoolReportsByModule(module models.Module) error {
 }
 
 // GetPreviousMasoolReports fetches reports for previous months of the same year.
-// Selectors (one or more, mutually combinable):
+// Selectors are mutually exclusive (the controller enforces exactly one):
 //   - masoolID > 0  : restrict to that masool
-//   - filters       : map of masool.Data key -> value (case-insensitive match);
-//                     only masools whose Data contains ALL given key/val pairs match
+//   - filters       : a single geographic level -> value (case-insensitive);
+//                     reports are matched by the geography that was effective for
+//                     each report's own month, not the masool's current area.
 //
-// If only filters are given, every matching masool's previous reports are returned.
+// Geography is resolved per report month from the masool's location history, so
+// reassigning a masool to a new area never rewrites the location of its past
+// reports.
 func GetPreviousMasoolReports(masoolID uint, filters map[string]string) ([]map[string]interface{}, error) {
 	currentMonth := time.Now().Format("2006_01")
 	parts := strings.Split(currentMonth, "_")
@@ -269,65 +272,81 @@ func GetPreviousMasoolReports(masoolID uint, filters map[string]string) ([]map[s
 	}
 	year := parts[0]
 
-	// 1. Resolve the set of masools to include.
-	var masools []models.Masool
+	// 1. Gather candidate reports for the current year, up to the current month.
+	query := db.DB.Where("month LIKE ?", year+"_%").Where("month <= ?", currentMonth).Order("id desc")
 	switch {
 	case masoolID != 0:
 		var m models.Masool
 		if err := db.DB.First(&m, masoolID).Error; err != nil {
 			return nil, fmt.Errorf("masool with id %d not found: %v", masoolID, err)
 		}
-		if len(filters) > 0 && !masoolMatchesHierarchyFilters(m, filters) {
-			return []map[string]interface{}{}, nil
-		}
-		masools = []models.Masool{m}
+		query = query.Where("masool_id = ?", masoolID)
 	case len(filters) > 0:
-		var all []models.Masool
-		if err := db.DB.Find(&all).Error; err != nil {
-			return nil, fmt.Errorf("failed to fetch masools: %v", err)
-		}
-		for _, m := range all {
-			if masoolMatchesHierarchyFilters(m, filters) {
-				masools = append(masools, m)
-			}
-		}
-		if len(masools) == 0 {
-			return []map[string]interface{}{}, nil
-		}
+		// Keep every report for the year; each is filtered below by the geography
+		// effective for its own month.
 	default:
 		return nil, fmt.Errorf("masool_id or at least one filter is required")
 	}
 
-	// 2. Fetch all previous reports for the selected masools.
-	masoolMap := make(map[uint]models.Masool, len(masools))
-	ids := make([]uint, 0, len(masools))
-	for _, m := range masools {
-		masoolMap[m.ID] = m
-		ids = append(ids, m.ID)
-	}
-
 	var reports []models.MasoolReport
-	if err := db.DB.Where("masool_id IN ?", ids).
-		Where("month LIKE ?", year+"_%").
-		Where("month <= ?", currentMonth).
-		Order("id desc").
-		Find(&reports).Error; err != nil {
+	if err := query.Find(&reports).Error; err != nil {
 		return nil, fmt.Errorf("failed to fetch previous reports: %v", err)
 	}
+	if len(reports) == 0 {
+		return []map[string]interface{}{}, nil
+	}
 
-	// 3. Flatten, deduping by (masoolID, month) — keep the latest per pair.
+	// 2. Load the masools referenced by those reports (name + non-geographic data).
+	idSet := make(map[uint]struct{}, len(reports))
+	for _, r := range reports {
+		idSet[r.MasoolID] = struct{}{}
+	}
+	ids := make([]uint, 0, len(idSet))
+	for id := range idSet {
+		ids = append(ids, id)
+	}
+
+	var masools []models.Masool
+	if err := db.DB.Where("id IN ?", ids).Find(&masools).Error; err != nil {
+		return nil, fmt.Errorf("failed to fetch masools: %v", err)
+	}
+	masoolMap := make(map[uint]models.Masool, len(masools))
+	for _, m := range masools {
+		masoolMap[m.ID] = m
+	}
+
+	// 3. Load location history for those masools, grouped by masool id.
+	var locs []models.MasoolLocation
+	if err := db.DB.Where("masool_id IN ?", ids).Find(&locs).Error; err != nil {
+		return nil, fmt.Errorf("failed to fetch masool locations: %v", err)
+	}
+	locsByMasool := make(map[uint][]models.MasoolLocation)
+	for _, l := range locs {
+		locsByMasool[l.MasoolID] = append(locsByMasool[l.MasoolID], l)
+	}
+
+	// 4. Build the response, resolving each report's geography by its own month
+	//    and deduping by (masoolID, month) — keep the latest per pair.
 	type monthKey struct {
 		masoolID uint
 		month    string
 	}
 	processed := make(map[monthKey]bool)
-	var result []map[string]interface{}
+	result := []map[string]interface{}{}
 
 	for _, report := range reports {
 		masool, ok := masoolMap[report.MasoolID]
 		if !ok {
 			continue
 		}
+
+		geo := resolveMasoolGeo(locsByMasool[report.MasoolID], report.Month, masool)
+
+		// Filter against the geography effective for this report's month.
+		if len(filters) > 0 && !geoMapMatchesHierarchy(geo, filters) {
+			continue
+		}
+
 		k := monthKey{report.MasoolID, report.Month}
 		if processed[k] {
 			continue
@@ -339,12 +358,18 @@ func GetPreviousMasoolReports(masoolID uint, filters map[string]string) ([]map[s
 		entry["name"] = masool.Name
 		entry["month"] = report.Month
 
+		// Masool's non-geographic data first.
 		for _, d := range masool.Data {
 			kk := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(d.Key), " ", "_"))
 			if kk != "" && kk != "name" && kk != "id" {
 				entry[kk] = d.Val
 			}
 		}
+		// Override the geographic levels with the values effective for this month.
+		for _, level := range geoHierarchy {
+			entry[level] = geo[level]
+		}
+		// Report's own data takes final precedence.
 		for _, d := range report.Data {
 			kk := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(d.Key), " ", "_"))
 			if kk != "" {
@@ -394,24 +419,23 @@ func flattenMasoolData(masool models.Masool) map[string]string {
 	return dataMap
 }
 
-// masoolMatchesHierarchyFilters is the hierarchy-aware matcher used by the
-// previous-reports endpoint. The filtered geographic level must equal the
-// requested value (case-insensitive) AND every level below it in the
+// geoMapMatchesHierarchy is the hierarchy-aware matcher used by the
+// previous-reports endpoint. geo is a resolved lowercase level -> value map
+// (see resolveMasoolGeo). The filtered geographic level must equal the requested
+// value (case-insensitive) AND every level below it in the
 // province > division > district > tehsil > area hierarchy must be empty.
 // Levels above the filtered one may hold any value. Non-geographic filter keys
 // fall back to a plain equality match.
-func masoolMatchesHierarchyFilters(masool models.Masool, filters map[string]string) bool {
+func geoMapMatchesHierarchy(geo map[string]string, filters map[string]string) bool {
 	if len(filters) == 0 {
 		return true
 	}
-
-	dataMap := flattenMasoolData(masool)
 
 	for fk, fv := range filters {
 		lfk := strings.ToLower(fk)
 
 		// The filtered level itself must match the requested value.
-		got, ok := dataMap[lfk]
+		got, ok := geo[lfk]
 		if !ok || !strings.EqualFold(strings.TrimSpace(got), strings.TrimSpace(fv)) {
 			return false
 		}
@@ -419,7 +443,7 @@ func masoolMatchesHierarchyFilters(masool models.Masool, filters map[string]stri
 		// For geographic filters, every level below the filtered one must be empty.
 		if level := geoLevelIndex(lfk); level >= 0 {
 			for _, lower := range geoHierarchy[level+1:] {
-				if strings.TrimSpace(dataMap[lower]) != "" {
+				if strings.TrimSpace(geo[lower]) != "" {
 					return false
 				}
 			}
@@ -435,19 +459,7 @@ func masoolMatchesFilters(masool models.Masool, filters map[string]string) bool 
 	if len(filters) == 0 {
 		return true
 	}
-	dataMap := make(map[string]string, len(masool.Data))
-	for _, d := range masool.Data {
-		key := strings.ToLower(strings.TrimSpace(d.Key))
-		if key == "" {
-			continue
-		}
-		switch v := d.Val.(type) {
-		case string:
-			dataMap[key] = v
-		default:
-			dataMap[key] = fmt.Sprintf("%v", v)
-		}
-	}
+	dataMap := flattenMasoolData(masool)
 	for fk, fv := range filters {
 		got, ok := dataMap[strings.ToLower(fk)]
 		if !ok || !strings.EqualFold(got, fv) {
