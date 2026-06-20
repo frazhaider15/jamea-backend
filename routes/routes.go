@@ -33,6 +33,7 @@ func SetupRouter() *gin.Engine {
 		auth.POST("/masool-report/upload", controllers.UploadMasoolReport)
 		auth.GET("/masool-report", controllers.GetMasoolReport)
 		auth.GET("/masool-report/previous", controllers.GetPreviousMasoolReports)
+		auth.GET("/report-summary", controllers.GetMonthlyReportSummary)
 		auth.DELETE("/masool-report", controllers.DeleteMasoolReport)
 		auth.POST("/activities", controllers.PostActivities)
 		auth.GET("/activities", controllers.GetActivities)
